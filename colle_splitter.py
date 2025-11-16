@@ -49,9 +49,10 @@ def detecter_planches(pdf_doc):
             ligne_strip = ligne.strip()
 
             # Vérifier si c'est "Planche Bonus" (doit être vérifié AVANT le pattern numérique)
-            if re.match(pattern_planche_bonus, ligne_strip):
-                # Calculer le numéro pour Planche Bonus = max(planches) + 1 ou 4 si vide
-                num_planche = max(planches.keys()) + 1 if planches else 4
+            # Insensible à la casse
+            if re.match(pattern_planche_bonus, ligne_strip, re.IGNORECASE):
+                # Toujours attribuer le numéro 4 à la Planche Bonus
+                num_planche = 4
                 planches[num_planche] = {
                     "start_page": page_num,
                     "end_page": page_num,
@@ -105,15 +106,20 @@ def compter_exercices(pdf_doc, start_page, end_page):
     # L'ordre est important : patterns les plus spécifiques d'abord
     pattern_combine = r"""
         (?:Exercice\s+\d+\s*[-–]\s*\w+\s*:)  |  # "Exercice 1 - Chimie :" ou "Exercice 2 - Physique :"
-        (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :" (NOUVEAU!)
+        (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :"
         (?:Exercice\s+n°\d+\s*:)              |  # "Exercice n°8 :"
         (?:Exercice\s+\d+\s*:)                |  # "Exercice 1:" (sans tiret ni matière)
-        (?:Exercice\s*:)                         # "Exercice :" (format minimal)
+        (?:Exercice\s*:)                      |  # "Exercice :" (avec deux-points)
+        (?:^Exercice\s*$)                        # "Exercice" seul sur une ligne (NOUVEAU!)
     """
 
     # Compter toutes les occurrences en une seule passe
     matches = re.findall(pattern_combine, texte_complet, re.VERBOSE | re.MULTILINE)
     nb_exercices = len(matches)
+
+    # Debug : afficher ce qui a été trouvé
+    if nb_exercices > 0 and matches:
+        print(f"   🔍 Exercices détectés : {matches}")
 
     return nb_exercices
 
@@ -149,13 +155,15 @@ def detecter_positions_exercices(pdf_doc, page_num):
     positions = []
 
     # Chercher tous les patterns possibles d'exercices
+    # L'ordre est important : les plus spécifiques d'abord pour éviter les faux positifs
     patterns_recherche = [
         "Exercice 1 -",
         "Exercice 2 -",
         "Exercice 3 -",
-        "Exercice de chimie",
-        "Exercice de physique",
-        "Exercice de",
+        "Exercice de chimie",      # Chercher d'abord les formes spécifiques
+        "Exercice de physique",     # avant les formes génériques
+        "Exercice de biologie",
+        "Exercice de mathématiques",
         "Exercice n°1",
         "Exercice n°2",
         "Exercice n°3",
@@ -163,6 +171,7 @@ def detecter_positions_exercices(pdf_doc, page_num):
         "Exercice 2:",
         "Exercice 3:",
         "Exercice :",
+        "Exercice",                 # En dernier recours, chercher juste "Exercice"
     ]
 
     for pattern in patterns_recherche:
@@ -187,6 +196,10 @@ def detecter_positions_exercices(pdf_doc, page_num):
 
     # Trier les positions du haut vers le bas
     positions.sort()
+
+    # Debug : afficher les positions trouvées
+    if positions:
+        print(f"   📍 Positions Y détectées : {[round(p, 1) for p in positions]}")
 
     return positions
 

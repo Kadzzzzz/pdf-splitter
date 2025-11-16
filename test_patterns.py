@@ -10,10 +10,11 @@ def tester_pattern(texte_test):
 
     pattern_combine = r"""
         (?:Exercice\s+\d+\s*[-–]\s*\w+\s*:)  |  # "Exercice 1 - Chimie :" ou "Exercice 2 - Physique :"
-        (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :" (NOUVEAU!)
+        (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :"
         (?:Exercice\s+n°\d+\s*:)              |  # "Exercice n°8 :"
         (?:Exercice\s+\d+\s*:)                |  # "Exercice 1:" (sans tiret ni matière)
-        (?:Exercice\s*:)                         # "Exercice :" (format minimal)
+        (?:Exercice\s*:)                      |  # "Exercice :" (avec deux-points)
+        (?:^Exercice\s*$)                        # "Exercice" seul sur une ligne (NOUVEAU!)
     """
 
     matches = re.findall(pattern_combine, texte_test, re.VERBOSE | re.MULTILINE)
@@ -125,6 +126,22 @@ print(f"Texte:\n{texte6}")
 print(f"Résultat: {nb} exercice(s) détecté(s)")
 print(f"Matches: {matches}")
 print(f"✅ ATTENDU: 2 exercices" if nb == 2 else f"❌ ERREUR: attendu 2, obtenu {nb}")
+
+print("\n" + "=" * 60)
+print("TEST 7: Format 'Exercice' seul sur une ligne (NOUVEAU!)")
+print("=" * 60)
+texte7 = """
+Planche 2
+
+Exercice
+Le titre de l'exercice sur la ligne suivante
+Blabla...
+"""
+nb, matches = tester_pattern(texte7)
+print(f"Texte:\n{texte7}")
+print(f"Résultat: {nb} exercice(s) détecté(s)")
+print(f"Matches: {matches}")
+print(f"✅ ATTENDU: 1 exercice" if nb == 1 else f"❌ ERREUR: attendu 1, obtenu {nb}")
 
 print("\n" + "=" * 60)
 print("RÉSUMÉ")
