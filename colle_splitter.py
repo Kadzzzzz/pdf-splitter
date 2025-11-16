@@ -79,24 +79,24 @@ def compter_exercices(pdf_doc, start_page, end_page):
     Returns:
         int: Nombre d'exercices détectés
     """
-    # Patterns pour détecter les exercices
-    patterns_exercices = [
-        r"Exercice\s*:\s*",                  # "Exercice : Titre"
-        r"Exercice\s+n°\d+\s*:\s*",          # "Exercice n°8 : Titre"
-        r"Exercice\s+\d+\s*[-–]\s*",         # "Exercice 1 - Chimie : Titre" (NOUVEAU!)
-        r"Exercice\s+\d+\s*:\s*",            # "Exercice 1: Titre"
-    ]
-
     # Extraire tout le texte de la planche
     texte_complet = ""
     for page_num in range(start_page, end_page + 1):
         texte_complet += extraire_texte_page(pdf_doc, page_num)
 
-    # Compter les occurrences
-    nb_exercices = 0
-    for pattern in patterns_exercices:
-        matches = re.findall(pattern, texte_complet, re.MULTILINE)
-        nb_exercices = max(nb_exercices, len(matches))
+    # Pattern combiné pour détecter tous les formats d'exercices
+    # Utilise des alternatives (|) pour tester tous les formats
+    # L'ordre est important : patterns les plus spécifiques d'abord
+    pattern_combine = r"""
+        (?:Exercice\s+\d+\s*[-–]\s*\w+\s*:)  |  # "Exercice 1 - Chimie :" ou "Exercice 2 - Physique :"
+        (?:Exercice\s+n°\d+\s*:)              |  # "Exercice n°8 :"
+        (?:Exercice\s+\d+\s*:)                |  # "Exercice 1:" (sans tiret ni matière)
+        (?:Exercice\s*:)                         # "Exercice :" (format minimal)
+    """
+
+    # Compter toutes les occurrences en une seule passe
+    matches = re.findall(pattern_combine, texte_complet, re.VERBOSE | re.MULTILINE)
+    nb_exercices = len(matches)
 
     return nb_exercices
 
