@@ -10,6 +10,7 @@ def tester_pattern(texte_test):
 
     pattern_combine = r"""
         (?:Exercice\s+\d+\s*[-–]\s*\w+\s*:)  |  # "Exercice 1 - Chimie :" ou "Exercice 2 - Physique :"
+        (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :" (NOUVEAU!)
         (?:Exercice\s+n°\d+\s*:)              |  # "Exercice n°8 :"
         (?:Exercice\s+\d+\s*:)                |  # "Exercice 1:" (sans tiret ni matière)
         (?:Exercice\s*:)                         # "Exercice :" (format minimal)
@@ -103,6 +104,24 @@ Blabla...
 """
 nb, matches = tester_pattern(texte5)
 print(f"Texte:\n{texte5}")
+print(f"Résultat: {nb} exercice(s) détecté(s)")
+print(f"Matches: {matches}")
+print(f"✅ ATTENDU: 2 exercices" if nb == 2 else f"❌ ERREUR: attendu 2, obtenu {nb}")
+
+print("\n" + "=" * 60)
+print("TEST 6: Format 'Exercice de chimie/physique' (NOUVEAU!)")
+print("=" * 60)
+texte6 = """
+Planche Bonus
+
+Exercice de chimie : L'ammoniac
+Blabla...
+
+Exercice de physique : Vitesse de libération (P4)
+Blabla...
+"""
+nb, matches = tester_pattern(texte6)
+print(f"Texte:\n{texte6}")
 print(f"Résultat: {nb} exercice(s) détecté(s)")
 print(f"Matches: {matches}")
 print(f"✅ ATTENDU: 2 exercices" if nb == 2 else f"❌ ERREUR: attendu 2, obtenu {nb}")

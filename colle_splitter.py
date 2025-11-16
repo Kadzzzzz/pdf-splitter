@@ -105,6 +105,7 @@ def compter_exercices(pdf_doc, start_page, end_page):
     # L'ordre est important : patterns les plus spécifiques d'abord
     pattern_combine = r"""
         (?:Exercice\s+\d+\s*[-–]\s*\w+\s*:)  |  # "Exercice 1 - Chimie :" ou "Exercice 2 - Physique :"
+        (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :" (NOUVEAU!)
         (?:Exercice\s+n°\d+\s*:)              |  # "Exercice n°8 :"
         (?:Exercice\s+\d+\s*:)                |  # "Exercice 1:" (sans tiret ni matière)
         (?:Exercice\s*:)                         # "Exercice :" (format minimal)
@@ -133,9 +134,67 @@ def extraire_pages(pdf_doc, start_page, end_page, output_path):
     nouveau_pdf.close()
 
 
+def detecter_positions_exercices(pdf_doc, page_num):
+    """
+    Détecte les positions Y des exercices dans une page
+
+    Args:
+        pdf_doc: Document PDF source
+        page_num: Numéro de la page (0-indexed)
+
+    Returns:
+        list: Liste des positions Y (coordonnées verticales) où commencent les exercices
+    """
+    page = pdf_doc[page_num]
+    positions = []
+
+    # Chercher tous les patterns possibles d'exercices
+    patterns_recherche = [
+        "Exercice 1 -",
+        "Exercice 2 -",
+        "Exercice 3 -",
+        "Exercice de chimie",
+        "Exercice de physique",
+        "Exercice de",
+        "Exercice n°1",
+        "Exercice n°2",
+        "Exercice n°3",
+        "Exercice 1:",
+        "Exercice 2:",
+        "Exercice 3:",
+        "Exercice :",
+    ]
+
+    for pattern in patterns_recherche:
+        # Chercher le texte dans la page (insensible à la casse)
+        text_instances = page.search_for(pattern, flags=fitz.TEXT_DEHYPHENATE)
+
+        for inst in text_instances:
+            # inst est un fitz.Rect qui contient les coordonnées
+            # On garde la position Y (verticale) du haut du rectangle
+            y_position = inst.y0
+
+            # Éviter les doublons (si plusieurs patterns matchent au même endroit)
+            # On considère que 2 positions à moins de 10 points sont identiques
+            est_doublon = False
+            for pos in positions:
+                if abs(pos - y_position) < 10:
+                    est_doublon = True
+                    break
+
+            if not est_doublon:
+                positions.append(y_position)
+
+    # Trier les positions du haut vers le bas
+    positions.sort()
+
+    return positions
+
+
 def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, output_path):
     """
     Découpe visuellement une page PDF en plusieurs parties verticales (haut/bas)
+    en utilisant les positions réelles des exercices détectés
 
     Args:
         pdf_doc: Document PDF source
@@ -149,14 +208,33 @@ def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, out
     width = rect.width
     height = rect.height
 
-    # Calculer la hauteur de chaque partie
-    hauteur_partie = height / nb_parties
+    # Détecter les positions réelles des exercices
+    positions_exercices = detecter_positions_exercices(pdf_doc, page_num)
 
-    # Définir le rectangle de découpe pour la partie demandée
-    y0 = partie_index * hauteur_partie
-    y1 = (partie_index + 1) * hauteur_partie
+    # Déterminer les coordonnées de découpe
+    if len(positions_exercices) >= nb_parties:
+        # On a détecté les positions des exercices, on les utilise !
+        if partie_index == 0:
+            # Premier exercice : du haut de la page jusqu'au début du 2ème exercice
+            y0 = 0
+            y1 = positions_exercices[1] if len(positions_exercices) > 1 else height
+        elif partie_index < nb_parties - 1:
+            # Exercice du milieu : du début de cet exercice au début du suivant
+            y0 = positions_exercices[partie_index]
+            y1 = positions_exercices[partie_index + 1]
+        else:
+            # Dernier exercice : du début de cet exercice jusqu'à la fin de la page
+            y0 = positions_exercices[partie_index]
+            y1 = height
+    else:
+        # Fallback : découpage égal si on n'a pas trouvé les positions
+        print(f"   ⚠️  Positions exactes non détectées, utilisation du découpage équitable")
+        hauteur_partie = height / nb_parties
+        y0 = partie_index * hauteur_partie
+        y1 = (partie_index + 1) * hauteur_partie
 
     crop_rect = fitz.Rect(0, y0, width, y1)
+    hauteur_partie = y1 - y0
 
     # Créer un nouveau PDF avec la partie découpée
     nouveau_pdf = fitz.open()
