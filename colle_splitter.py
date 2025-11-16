@@ -125,12 +125,13 @@ def compter_exercices(pdf_doc, start_page, end_page):
     # Utilise des alternatives (|) pour tester tous les formats
     # L'ordre est important : patterns les plus spécifiques d'abord
     pattern_combine = r"""
+        (?:Exercice\s+Bonus)                  |  # "Exercice Bonus" (NOUVEAU!)
         (?:Exercice\s+\d+\s*[-–]\s*\w+\s*:)  |  # "Exercice 1 - Chimie :" ou "Exercice 2 - Physique :"
         (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :"
         (?:Exercice\s+n°\d+\s*:)              |  # "Exercice n°8 :"
         (?:Exercice\s+\d+\s*:)                |  # "Exercice 1:" (sans tiret ni matière)
         (?:Exercice\s*:)                      |  # "Exercice :" (avec deux-points)
-        (?:^Exercice\s*$)                        # "Exercice" seul sur une ligne (NOUVEAU!)
+        (?:^Exercice\s*$)                        # "Exercice" seul sur une ligne
     """
 
     # Compter toutes les occurrences en une seule passe
@@ -177,10 +178,11 @@ def detecter_positions_exercices(pdf_doc, page_num):
     # Chercher tous les patterns possibles d'exercices
     # L'ordre est important : les plus spécifiques d'abord pour éviter les faux positifs
     patterns_recherche = [
+        "Exercice Bonus",           # Exercice Bonus (à détecter en premier)
         "Exercice 1 -",
         "Exercice 2 -",
         "Exercice 3 -",
-        "Exercice de chimie",      # Chercher d'abord les formes spécifiques
+        "Exercice de chimie",       # Chercher d'abord les formes spécifiques
         "Exercice de physique",     # avant les formes génériques
         "Exercice de biologie",
         "Exercice de mathématiques",
@@ -224,6 +226,42 @@ def detecter_positions_exercices(pdf_doc, page_num):
     return positions
 
 
+def detecter_fin_contenu(pdf_doc, page_num, y_debut):
+    """
+    Détecte où se termine le contenu réel d'un exercice (avant les coordonnées du prof)
+
+    Args:
+        pdf_doc: Document PDF source
+        page_num: Numéro de la page (0-indexed)
+        y_debut: Position Y de début de l'exercice
+
+    Returns:
+        float: Position Y de fin du contenu (ou None si non trouvé)
+    """
+    page = pdf_doc[page_num]
+
+    # Patterns à chercher pour détecter la fin du contenu
+    patterns_fin = [
+        "Jeremy Luccioni",
+        "jeremy.luccioni",
+        "jeremy-luccioni.fr",
+        "@",  # Email
+        "http",  # URL
+    ]
+
+    position_fin = None
+
+    for pattern in patterns_fin:
+        instances = page.search_for(pattern, flags=fitz.TEXT_DEHYPHENATE)
+        for inst in instances:
+            # Vérifier que c'est bien après le début de l'exercice
+            if inst.y0 > y_debut:
+                if position_fin is None or inst.y0 < position_fin:
+                    position_fin = inst.y0
+
+    return position_fin
+
+
 def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, output_path):
     """
     Découpe visuellement une page PDF en plusieurs parties verticales (haut/bas)
@@ -257,9 +295,19 @@ def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, out
             y0 = positions_exercices[partie_index]
             y1 = positions_exercices[partie_index + 1]
         else:
-            # Dernier exercice : du début de cet exercice jusqu'à la fin de la page
+            # Dernier exercice : du début de cet exercice jusqu'à la fin du contenu
             y0 = positions_exercices[partie_index]
-            y1 = height
+
+            # Détecter la fin du contenu (coordonnées du prof)
+            fin_contenu = detecter_fin_contenu(pdf_doc, page_num, y0)
+            if fin_contenu:
+                y1 = fin_contenu - 10  # Petite marge avant les coordonnées
+                print(f"   📏 Fin du contenu détectée à y={round(fin_contenu, 1)}, découpe à y={round(y1, 1)}")
+            else:
+                # Fallback : 85% de la hauteur de la page
+                y1 = height * 0.85
+                print(f"   📏 Fin du contenu non détectée, découpe à 85% de la hauteur")
+
         print(f"   ✂️  Partie {partie_index + 1}: découpe de y={round(y0, 1)} à y={round(y1, 1)}")
     else:
         # Fallback : découpage égal si on n'a pas trouvé les positions

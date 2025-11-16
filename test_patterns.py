@@ -9,12 +9,13 @@ def tester_pattern(texte_test):
     """Teste le pattern combiné sur un texte donné"""
 
     pattern_combine = r"""
+        (?:Exercice\s+Bonus)                  |  # "Exercice Bonus" (NOUVEAU!)
         (?:Exercice\s+\d+\s*[-–]\s*\w+\s*:)  |  # "Exercice 1 - Chimie :" ou "Exercice 2 - Physique :"
         (?:Exercice\s+de\s+\w+\s*:)           |  # "Exercice de chimie :" ou "Exercice de physique :"
         (?:Exercice\s+n°\d+\s*:)              |  # "Exercice n°8 :"
         (?:Exercice\s+\d+\s*:)                |  # "Exercice 1:" (sans tiret ni matière)
         (?:Exercice\s*:)                      |  # "Exercice :" (avec deux-points)
-        (?:^Exercice\s*$)                        # "Exercice" seul sur une ligne (NOUVEAU!)
+        (?:^Exercice\s*$)                        # "Exercice" seul sur une ligne
     """
 
     matches = re.findall(pattern_combine, texte_test, re.VERBOSE | re.MULTILINE)
@@ -139,6 +140,20 @@ Blabla...
 """
 nb, matches = tester_pattern(texte7)
 print(f"Texte:\n{texte7}")
+print(f"Résultat: {nb} exercice(s) détecté(s)")
+print(f"Matches: {matches}")
+print(f"✅ ATTENDU: 1 exercice" if nb == 1 else f"❌ ERREUR: attendu 1, obtenu {nb}")
+
+print("\n" + "=" * 60)
+print("TEST 8: Format 'Exercice Bonus' (NOUVEAU!)")
+print("=" * 60)
+texte8 = """
+Exercice Bonus
+Fil lesté entre deux poulies (P4)
+Blabla...
+"""
+nb, matches = tester_pattern(texte8)
+print(f"Texte:\n{texte8}")
 print(f"Résultat: {nb} exercice(s) détecté(s)")
 print(f"Matches: {matches}")
 print(f"✅ ATTENDU: 1 exercice" if nb == 1 else f"❌ ERREUR: attendu 1, obtenu {nb}")
