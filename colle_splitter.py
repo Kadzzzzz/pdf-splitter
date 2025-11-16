@@ -226,40 +226,70 @@ def detecter_positions_exercices(pdf_doc, page_num):
     return positions
 
 
-def detecter_fin_contenu(pdf_doc, page_num, y_debut):
+def detecter_fin_contenu(pdf_doc, page_num, y_debut, y_fin_max=None):
     """
-    Détecte où se termine le contenu réel d'un exercice (avant les coordonnées du prof)
+    Détecte où se termine le contenu réel d'un exercice (la dernière ligne de texte)
 
     Args:
         pdf_doc: Document PDF source
         page_num: Numéro de la page (0-indexed)
         y_debut: Position Y de début de l'exercice
+        y_fin_max: Position Y maximale (fin de page ou début du prochain exercice)
 
     Returns:
         float: Position Y de fin du contenu (ou None si non trouvé)
     """
     page = pdf_doc[page_num]
+    rect = page.rect
 
-    # Patterns à chercher pour détecter la fin du contenu
-    patterns_fin = [
+    if y_fin_max is None:
+        y_fin_max = rect.height
+
+    # Patterns à ignorer (footer)
+    patterns_ignore = [
         "Jeremy Luccioni",
         "jeremy.luccioni",
         "jeremy-luccioni.fr",
         "@",  # Email
         "http",  # URL
+        "Lycée",
+        "PCSI",
+        "MPSI",
     ]
 
-    position_fin = None
-
-    for pattern in patterns_fin:
+    # Trouver la position du footer si présent
+    position_footer = y_fin_max
+    for pattern in patterns_ignore:
         instances = page.search_for(pattern, flags=fitz.TEXT_DEHYPHENATE)
         for inst in instances:
-            # Vérifier que c'est bien après le début de l'exercice
-            if inst.y0 > y_debut:
-                if position_fin is None or inst.y0 < position_fin:
-                    position_fin = inst.y0
+            if inst.y0 > y_debut and inst.y0 < position_footer:
+                position_footer = inst.y0
 
-    return position_fin
+    # Extraire tous les blocs de texte de la page
+    blocks = page.get_text("dict")["blocks"]
+
+    derniere_ligne_y = y_debut
+
+    for block in blocks:
+        if "lines" in block:  # C'est un bloc de texte (pas une image)
+            for line in block["lines"]:
+                # Récupérer le rectangle de la ligne
+                line_bbox = line["bbox"]  # (x0, y0, x1, y1)
+                y_top = line_bbox[1]
+                y_bottom = line_bbox[3]
+
+                # Vérifier que la ligne est dans la zone de l'exercice
+                # (après le début et avant le footer)
+                if y_top >= y_debut and y_bottom < position_footer:
+                    # Mettre à jour la position de la dernière ligne
+                    if y_bottom > derniere_ligne_y:
+                        derniere_ligne_y = y_bottom
+
+    # Ajouter une petite marge après la dernière ligne
+    if derniere_ligne_y > y_debut:
+        return derniere_ligne_y + 5  # 5 points de marge
+
+    return None
 
 
 def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, output_path):
@@ -286,8 +316,21 @@ def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, out
     if len(positions_exercices) >= nb_parties:
         # On a détecté les positions des exercices, on les utilise !
         print(f"   ✂️  Découpage intelligent : {len(positions_exercices)} positions pour {nb_parties} exercices")
-        if partie_index == 0:
-            # Premier exercice : du haut de la page jusqu'au début du 2ème exercice
+        if partie_index == 0 and nb_parties == 1:
+            # Un seul exercice sur la page : du haut jusqu'à la fin du contenu
+            y0 = 0
+
+            # Détecter la fin du contenu réel (dernière ligne de texte)
+            fin_contenu = detecter_fin_contenu(pdf_doc, page_num, y0, height)
+            if fin_contenu:
+                y1 = fin_contenu
+                print(f"   📏 Fin du contenu détectée à y={round(fin_contenu, 1)} (dernière ligne de texte)")
+            else:
+                # Fallback : 85% de la hauteur de la page
+                y1 = height * 0.85
+                print(f"   📏 Fin du contenu non détectée, découpe à 85% de la hauteur")
+        elif partie_index == 0:
+            # Premier exercice (mais pas le seul) : du haut de la page jusqu'au début du 2ème exercice
             y0 = 0
             y1 = positions_exercices[1] if len(positions_exercices) > 1 else height
         elif partie_index < nb_parties - 1:
@@ -295,14 +338,14 @@ def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, out
             y0 = positions_exercices[partie_index]
             y1 = positions_exercices[partie_index + 1]
         else:
-            # Dernier exercice : du début de cet exercice jusqu'à la fin du contenu
+            # Dernier exercice : du début de cet exercice jusqu'à la fin du contenu réel
             y0 = positions_exercices[partie_index]
 
-            # Détecter la fin du contenu (coordonnées du prof)
-            fin_contenu = detecter_fin_contenu(pdf_doc, page_num, y0)
+            # Détecter la fin du contenu réel (dernière ligne de texte)
+            fin_contenu = detecter_fin_contenu(pdf_doc, page_num, y0, height)
             if fin_contenu:
-                y1 = fin_contenu - 10  # Petite marge avant les coordonnées
-                print(f"   📏 Fin du contenu détectée à y={round(fin_contenu, 1)}, découpe à y={round(y1, 1)}")
+                y1 = fin_contenu
+                print(f"   📏 Fin du contenu détectée à y={round(fin_contenu, 1)} (dernière ligne de texte)")
             else:
                 # Fallback : 85% de la hauteur de la page
                 y1 = height * 0.85
@@ -312,10 +355,24 @@ def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, out
     else:
         # Fallback : découpage égal si on n'a pas trouvé les positions
         print(f"   ⚠️  Positions exactes non détectées ({len(positions_exercices)} positions pour {nb_parties} exercices)")
-        print(f"   ⚠️  Utilisation du découpage équitable (50/50)")
-        hauteur_partie = height / nb_parties
-        y0 = partie_index * hauteur_partie
-        y1 = (partie_index + 1) * hauteur_partie
+
+        if nb_parties == 1:
+            # Un seul exercice : essayer de détecter la fin du contenu quand même
+            y0 = 0
+            fin_contenu = detecter_fin_contenu(pdf_doc, page_num, y0, height)
+            if fin_contenu:
+                y1 = fin_contenu
+                print(f"   📏 Fin du contenu détectée à y={round(fin_contenu, 1)} (dernière ligne de texte)")
+            else:
+                y1 = height * 0.85
+                print(f"   ⚠️  Fin du contenu non détectée, découpe à 85% de la hauteur")
+        else:
+            # Plusieurs exercices : découpage équitable
+            print(f"   ⚠️  Utilisation du découpage équitable")
+            hauteur_partie = height / nb_parties
+            y0 = partie_index * hauteur_partie
+            y1 = (partie_index + 1) * hauteur_partie
+
         print(f"   ✂️  Partie {partie_index + 1}: découpe de y={round(y0, 1)} à y={round(y1, 1)}")
 
     crop_rect = fitz.Rect(0, y0, width, y1)
@@ -379,9 +436,22 @@ def traiter_planche(pdf_doc, num_planche, planche_info, output_dir):
     nombre_pages = end_page - start_page + 1
 
     if nb_exercices == 1:
-        # Un seul exercice : extraire toute(s) la/les page(s) de la planche
+        # Un seul exercice
         output_path = output_dir / f"P{num_planche}.pdf"
-        extraire_pages(pdf_doc, start_page, end_page, str(output_path))
+
+        if nombre_pages == 1:
+            # Un seul exercice sur une seule page : découper pour enlever les espaces blancs
+            decouper_page_verticalement(
+                pdf_doc,
+                start_page,      # La page unique
+                1,               # 1 seul exercice
+                0,               # Premier (et seul) exercice
+                str(output_path)
+            )
+        else:
+            # Un seul exercice sur plusieurs pages : extraire toutes les pages
+            extraire_pages(pdf_doc, start_page, end_page, str(output_path))
+
         print(f"   └─ 1 exercice détecté → P{num_planche}.pdf ✅")
         return 1
     else:
