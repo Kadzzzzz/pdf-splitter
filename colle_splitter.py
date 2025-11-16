@@ -29,7 +29,7 @@ def extraire_texte_page(pdf_doc, page_num):
 
 def detecter_planches(pdf_doc):
     """
-    Détecte toutes les planches dans le PDF
+    Détecte toutes les planches dans le PDF (y compris Planche Bonus)
 
     Args:
         pdf_doc: Document PDF ouvert avec fitz
@@ -38,19 +38,35 @@ def detecter_planches(pdf_doc):
         dict: {numéro_planche: {"start_page": X, "end_page": Y}}
     """
     planches = {}
-    pattern_planche = r"^Planche\s+(\d+)"
+    pattern_planche_num = r"^Planche\s+(\d+)"
+    pattern_planche_bonus = r"^Planche\s+Bonus"
 
     for page_num in range(len(pdf_doc)):
         texte = extraire_texte_page(pdf_doc, page_num)
 
-        # Chercher "Planche X" en début de page
+        # Chercher "Planche X" ou "Planche Bonus" en début de page
         for ligne in texte.split('\n'):
-            match = re.match(pattern_planche, ligne.strip())
+            ligne_strip = ligne.strip()
+
+            # Vérifier si c'est "Planche Bonus" (doit être vérifié AVANT le pattern numérique)
+            if re.match(pattern_planche_bonus, ligne_strip):
+                # Calculer le numéro pour Planche Bonus = max(planches) + 1 ou 4 si vide
+                num_planche = max(planches.keys()) + 1 if planches else 4
+                planches[num_planche] = {
+                    "start_page": page_num,
+                    "end_page": page_num,
+                    "nom": "Bonus"
+                }
+                break
+
+            # Vérifier si c'est "Planche X" (numérique)
+            match = re.match(pattern_planche_num, ligne_strip)
             if match:
                 num_planche = int(match.group(1))
                 planches[num_planche] = {
                     "start_page": page_num,
-                    "end_page": page_num  # Sera ajusté plus tard
+                    "end_page": page_num,
+                    "nom": str(num_planche)
                 }
                 break
 
@@ -117,6 +133,47 @@ def extraire_pages(pdf_doc, start_page, end_page, output_path):
     nouveau_pdf.close()
 
 
+def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, output_path):
+    """
+    Découpe visuellement une page PDF en plusieurs parties verticales (haut/bas)
+
+    Args:
+        pdf_doc: Document PDF source
+        page_num: Numéro de la page à découper (0-indexed)
+        nb_parties: Nombre de parties (2 = moitié haute et moitié basse)
+        partie_index: Index de la partie à extraire (0 = première partie/haut, 1 = deuxième partie/bas, etc.)
+        output_path: Chemin de sortie du PDF
+    """
+    page = pdf_doc[page_num]
+    rect = page.rect  # Rectangle de la page complète
+    width = rect.width
+    height = rect.height
+
+    # Calculer la hauteur de chaque partie
+    hauteur_partie = height / nb_parties
+
+    # Définir le rectangle de découpe pour la partie demandée
+    y0 = partie_index * hauteur_partie
+    y1 = (partie_index + 1) * hauteur_partie
+
+    crop_rect = fitz.Rect(0, y0, width, y1)
+
+    # Créer un nouveau PDF avec la partie découpée
+    nouveau_pdf = fitz.open()
+    nouvelle_page = nouveau_pdf.new_page(width=width, height=hauteur_partie)
+
+    # Afficher la portion de la page source sur la nouvelle page
+    nouvelle_page.show_pdf_page(
+        nouvelle_page.rect,  # Destination (toute la nouvelle page)
+        pdf_doc,             # Document source
+        page_num,            # Numéro de page source
+        clip=crop_rect       # Zone à copier (la partie découpée)
+    )
+
+    nouveau_pdf.save(output_path)
+    nouveau_pdf.close()
+
+
 def extraire_programme(pdf_doc, output_dir):
     """
     Extrait la première page (Programme) et sauvegarde
@@ -132,56 +189,76 @@ def extraire_programme(pdf_doc, output_dir):
 
 def traiter_planche(pdf_doc, num_planche, planche_info, output_dir):
     """
-    Traite une planche complète :
+    Traite une planche complète avec découpage visuel des exercices :
     1. Compte les exercices
-    2. Découpe selon le nombre
+    2. Découpe visuellement la page selon le nombre d'exercices
     3. Sauvegarde avec la bonne convention de nommage
 
     Args:
         pdf_doc: Document PDF source
         num_planche: Numéro de la planche
-        planche_info: Dict avec start_page et end_page
+        planche_info: Dict avec start_page, end_page et nom
         output_dir: Répertoire de sortie
     """
     start_page = planche_info["start_page"]
     end_page = planche_info["end_page"]
+    nom_planche = planche_info.get("nom", str(num_planche))
 
     # Compter les exercices
     nb_exercices = compter_exercices(pdf_doc, start_page, end_page)
 
-    print(f"\n📝 Traitement Planche {num_planche} :")
+    print(f"\n📝 Traitement Planche {nom_planche} :")
 
     if nb_exercices == 0:
-        print(f"❌ Erreur : Aucun exercice détecté dans la planche (pages {start_page} à {end_page})")
+        print(f"❌ Erreur : Aucun exercice détecté dans la planche (pages {start_page + 1} à {end_page + 1})")
         return 0
 
     nombre_pages = end_page - start_page + 1
 
     if nb_exercices == 1:
-        # Un seul exercice : PX.pdf
+        # Un seul exercice : extraire toute(s) la/les page(s) de la planche
         output_path = output_dir / f"P{num_planche}.pdf"
         extraire_pages(pdf_doc, start_page, end_page, str(output_path))
         print(f"   └─ 1 exercice détecté → P{num_planche}.pdf ✅")
         return 1
     else:
-        # Plusieurs exercices : PX-1.pdf, PX-2.pdf, etc.
-        pages_par_exercice = nombre_pages / nb_exercices
+        # Plusieurs exercices : découper visuellement la page
         fichiers_crees = 0
 
-        for i in range(nb_exercices):
-            # Calculer les pages pour cet exercice
-            ex_start = int(start_page + i * pages_par_exercice)
-            ex_end = int(start_page + (i + 1) * pages_par_exercice - 1)
+        if nombre_pages == 1:
+            # Cas typique : tous les exercices sont sur UNE SEULE page
+            # → Découper visuellement cette page en N parties verticales
+            for i in range(nb_exercices):
+                output_path = output_dir / f"P{num_planche}-{i+1}.pdf"
+                decouper_page_verticalement(
+                    pdf_doc,
+                    start_page,      # La page unique à découper
+                    nb_exercices,    # Nombre de parties
+                    i,               # Index de la partie (0 = haut, 1 = bas, etc.)
+                    str(output_path)
+                )
+                fichiers_crees += 1
 
-            # Gérer le dernier exercice (s'assurer d'aller jusqu'à la fin)
-            if i == nb_exercices - 1:
-                ex_end = end_page
+            print(f"   └─ {nb_exercices} exercices détectés (sur 1 page) → P{num_planche}-1.pdf à P{num_planche}-{nb_exercices}.pdf ✅")
+        else:
+            # Cas rare : la planche s'étend sur plusieurs pages
+            # → Diviser équitablement les pages entre les exercices
+            pages_par_exercice = nombre_pages / nb_exercices
 
-            output_path = output_dir / f"P{num_planche}-{i+1}.pdf"
-            extraire_pages(pdf_doc, ex_start, ex_end, str(output_path))
-            fichiers_crees += 1
+            for i in range(nb_exercices):
+                ex_start = int(start_page + i * pages_par_exercice)
+                ex_end = int(start_page + (i + 1) * pages_par_exercice - 1)
 
-        print(f"   └─ {nb_exercices} exercices détectés → P{num_planche}-1.pdf à P{num_planche}-{nb_exercices}.pdf ✅")
+                # Gérer le dernier exercice (s'assurer d'aller jusqu'à la fin)
+                if i == nb_exercices - 1:
+                    ex_end = end_page
+
+                output_path = output_dir / f"P{num_planche}-{i+1}.pdf"
+                extraire_pages(pdf_doc, ex_start, ex_end, str(output_path))
+                fichiers_crees += 1
+
+            print(f"   └─ {nb_exercices} exercices détectés (sur {nombre_pages} pages) → P{num_planche}-1.pdf à P{num_planche}-{nb_exercices}.pdf ✅")
+
         return fichiers_crees
 
 
