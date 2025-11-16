@@ -45,12 +45,20 @@ def detecter_planches(pdf_doc):
         texte = extraire_texte_page(pdf_doc, page_num)
 
         # Chercher "Planche X" ou "Planche Bonus" en début de page
+        planche_trouvee = False
         for ligne in texte.split('\n'):
             ligne_strip = ligne.strip()
 
+            if not ligne_strip:
+                continue
+
+            # Debug : afficher les premières lignes de chaque page
+            if not planche_trouvee:
+                print(f"   📄 Page {page_num + 1}, première ligne non vide: '{ligne_strip[:60]}...'")
+
             # Vérifier si c'est "Planche Bonus" (doit être vérifié AVANT le pattern numérique)
-            # Insensible à la casse
-            if re.match(pattern_planche_bonus, ligne_strip, re.IGNORECASE):
+            # Insensible à la casse et plus flexible
+            if re.search(r"Planche\s+Bonus", ligne_strip, re.IGNORECASE):
                 # Toujours attribuer le numéro 4 à la Planche Bonus
                 num_planche = 4
                 planches[num_planche] = {
@@ -58,10 +66,12 @@ def detecter_planches(pdf_doc):
                     "end_page": page_num,
                     "nom": "Bonus"
                 }
+                print(f"   ✅ Planche Bonus détectée à la page {page_num + 1} → sera P4")
+                planche_trouvee = True
                 break
 
             # Vérifier si c'est "Planche X" (numérique)
-            match = re.match(pattern_planche_num, ligne_strip)
+            match = re.search(r"Planche\s+(\d+)", ligne_strip)
             if match:
                 num_planche = int(match.group(1))
                 planches[num_planche] = {
@@ -69,6 +79,8 @@ def detecter_planches(pdf_doc):
                     "end_page": page_num,
                     "nom": str(num_planche)
                 }
+                print(f"   ✅ Planche {num_planche} détectée à la page {page_num + 1}")
+                planche_trouvee = True
                 break
 
     # Ajuster les end_page en fonction de la planche suivante
@@ -227,6 +239,7 @@ def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, out
     # Déterminer les coordonnées de découpe
     if len(positions_exercices) >= nb_parties:
         # On a détecté les positions des exercices, on les utilise !
+        print(f"   ✂️  Découpage intelligent : {len(positions_exercices)} positions pour {nb_parties} exercices")
         if partie_index == 0:
             # Premier exercice : du haut de la page jusqu'au début du 2ème exercice
             y0 = 0
@@ -239,12 +252,15 @@ def decouper_page_verticalement(pdf_doc, page_num, nb_parties, partie_index, out
             # Dernier exercice : du début de cet exercice jusqu'à la fin de la page
             y0 = positions_exercices[partie_index]
             y1 = height
+        print(f"   ✂️  Partie {partie_index + 1}: découpe de y={round(y0, 1)} à y={round(y1, 1)}")
     else:
         # Fallback : découpage égal si on n'a pas trouvé les positions
-        print(f"   ⚠️  Positions exactes non détectées, utilisation du découpage équitable")
+        print(f"   ⚠️  Positions exactes non détectées ({len(positions_exercices)} positions pour {nb_parties} exercices)")
+        print(f"   ⚠️  Utilisation du découpage équitable (50/50)")
         hauteur_partie = height / nb_parties
         y0 = partie_index * hauteur_partie
         y1 = (partie_index + 1) * hauteur_partie
+        print(f"   ✂️  Partie {partie_index + 1}: découpe de y={round(y0, 1)} à y={round(y1, 1)}")
 
     crop_rect = fitz.Rect(0, y0, width, y1)
     hauteur_partie = y1 - y0
@@ -417,9 +433,13 @@ Exemples d'utilisation :
         sys.exit(1)
 
     # Afficher les planches détectées
+    print(f"\n📋 Récapitulatif des planches détectées :")
     for num in sorted(planches.keys()):
         start = planches[num]["start_page"]
-        print(f"🔍    {'├' if num < max(planches.keys()) else '└'}─ Planche {num} détectée (page {start + 1})")
+        end = planches[num]["end_page"]
+        nom = planches[num].get("nom", str(num))
+        symbole = '├' if num < max(planches.keys()) else '└'
+        print(f"   {symbole}─ Planche {nom} (numéro {num}) : page(s) {start + 1} à {end + 1}")
 
     # Traiter chaque planche
     for num in sorted(planches.keys()):
