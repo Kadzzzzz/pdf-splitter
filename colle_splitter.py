@@ -56,9 +56,9 @@ def detecter_planches(pdf_doc):
             if not planche_trouvee:
                 print(f"   📄 Page {page_num + 1}, première ligne non vide: '{ligne_strip[:60]}...'")
 
-            # Vérifier si c'est "Planche Bonus" (doit être vérifié AVANT le pattern numérique)
+            # Vérifier si c'est "Planche Bonus" ou "Exercice Bonus" (doit être vérifié AVANT le pattern numérique)
             # Insensible à la casse et plus flexible
-            if re.search(r"Planche\s+Bonus", ligne_strip, re.IGNORECASE):
+            if re.search(r"(Planche|Exercice)\s+Bonus", ligne_strip, re.IGNORECASE):
                 # Toujours attribuer le numéro 4 à la Planche Bonus
                 num_planche = 4
                 planches[num_planche] = {
@@ -66,7 +66,7 @@ def detecter_planches(pdf_doc):
                     "end_page": page_num,
                     "nom": "Bonus"
                 }
-                print(f"   ✅ Planche Bonus détectée à la page {page_num + 1} → sera P4")
+                print(f"   ✅ Planche/Exercice Bonus détecté à la page {page_num + 1} → sera P4")
                 planche_trouvee = True
                 break
 
@@ -111,7 +111,15 @@ def compter_exercices(pdf_doc, start_page, end_page):
     # Extraire tout le texte de la planche
     texte_complet = ""
     for page_num in range(start_page, end_page + 1):
-        texte_complet += extraire_texte_page(pdf_doc, page_num)
+        texte_page = extraire_texte_page(pdf_doc, page_num)
+        texte_complet += texte_page
+
+        # Debug : compter les exercices par page
+        if end_page > start_page:  # Seulement si plusieurs pages
+            pattern_debug = r"Exercice\s+(de\s+\w+\s*:|\d+\s*[-–]\s*\w+\s*:|n°\d+\s*:|\d+\s*:|:)"
+            matches_page = re.findall(pattern_debug, texte_page, re.IGNORECASE)
+            if matches_page:
+                print(f"   🔍 Page {page_num + 1}: {len(matches_page)} exercice(s)")
 
     # Pattern combiné pour détecter tous les formats d'exercices
     # Utilise des alternatives (|) pour tester tous les formats
